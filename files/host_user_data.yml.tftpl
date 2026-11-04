@@ -1,6 +1,7 @@
 #cloud-config
 packages:
-  - awslogs
+  - amazon-cloudwatch-agent
+  - logrotate
   - nfs-utils
 
 write_files:
@@ -13,45 +14,74 @@ write_files:
       ECS_AVAILABLE_LOGGING_DRIVERS=["awslogs","fluentd","json-file","none"]
       ECS_ENABLE_TASK_IAM_ROLE=true
 
-  - path: /etc/awslogs/awslogs.conf
+  # The CloudWatch agent can't read the journal, so it's followed into a
+  # file the agent ships, and rotated by logrotate
+  - path: /etc/systemd/system/journal-export.service
     content: |
-      [general]
-      state_file = /var/lib/awslogs/agent-state
+      [Unit]
+      Description=Copy the system journal to /var/log/journal-export.log
+      After=systemd-journald.service
 
-      [/var/log/dmesg]
-      file = /var/log/dmesg
-      log_stream_name = /var/log/dmesg
-      log_group_name = /ecs/cluster/${cluster_name}
+      [Service]
+      ExecStart=/bin/sh -c 'exec journalctl --follow --boot --no-tail --cursor-file=/var/lib/journal-export.cursor --output=short-iso >> /var/log/journal-export.log'
+      Restart=always
+      RestartSec=5
 
-      [/var/log/messages]
-      file = /var/log/messages
-      log_stream_name = /var/log/messages
-      log_group_name = /ecs/cluster/${cluster_name}
-      datetime_format = %b %d %H:%M:%S
+      [Install]
+      WantedBy=multi-user.target
 
-      [/var/log/docker]
-      file = /var/log/docker
-      log_stream_name = /var/log/docker
-      log_group_name = /ecs/cluster/${cluster_name}
-      datetime_format = %Y-%m-%dT%H:%M:%S.%f
+  - path: /etc/logrotate.d/journal-export
+    content: |
+      /var/log/journal-export.log {
+        daily
+        rotate 2
+        maxsize 100M
+        missingok
+        notifempty
+        compress
+        copytruncate
+      }
 
-      [/var/log/ecs/ecs-init.log]
-      file = /var/log/ecs/ecs-init.log
-      log_stream_name = /var/log/ecs/ecs-init.log
-      log_group_name = /ecs/cluster/${cluster_name}
-      datetime_format = %Y-%m-%dT%H:%M:%SZ
+  - path: /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+    content: |
+      {
+        "agent": {
+          "run_as_user": "root"
+        },
+        "logs": {
+          "logs_collected": {
+            "files": {
+              "collect_list": [
+                {
+                  "file_path": "/var/log/journal-export.log",
+                  "log_group_name": "${log_group_name}",
+                  "log_stream_name": "{instance_id}/journal"
+                },
+                {
+                  "file_path": "/var/log/ecs/ecs-init.log",
+                  "log_group_name": "${log_group_name}",
+                  "log_stream_name": "{instance_id}/ecs-init.log"
+                },
+                {
+                  "file_path": "/var/log/ecs/ecs-agent.log*",
+                  "log_group_name": "${log_group_name}",
+                  "log_stream_name": "{instance_id}/ecs-agent.log"
+                },
+                {
+                  "file_path": "/var/log/ecs/audit.log*",
+                  "log_group_name": "${log_group_name}",
+                  "log_stream_name": "{instance_id}/audit.log"
+                }
+              ]
+            }
+          }
+        }
+      }
 
-      [/var/log/ecs/ecs-agent.log]
-      file = /var/log/ecs/ecs-agent.log.*
-      log_stream_name = /var/log/ecs/ecs-agent.log
-      log_group_name = /ecs/cluster/${cluster_name}
-      datetime_format = %Y-%m-%dT%H:%M:%SZ
-
-      [/var/log/ecs/audit.log]
-      file = /var/log/ecs/audit.log.*
-      log_stream_name = /var/log/ecs/audit.log
-      log_group_name = /ecs/cluster/${cluster_name}
-      datetime_format = %Y-%m-%dT%H:%M:%SZ
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now journal-export.service
+  - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
 
 users: %{ for user in users ~}
   - name: ${user.name}

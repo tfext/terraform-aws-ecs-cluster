@@ -20,8 +20,23 @@ resource "aws_iam_role_policy_attachment" "ecs_host_policy" {
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_host_ssm_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   role       = aws_iam_role.ecs_host.id
+}
+
+# The CloudWatch agent on each host ships its logs to the cluster's log group
+resource "aws_iam_role_policy" "ecs_host_logs" {
+  name   = "${var.name}_ecs_host_logs"
+  role   = aws_iam_role.ecs_host.id
+  policy = data.aws_iam_policy_document.ecs_host_logs.json
+}
+
+data "aws_iam_policy_document" "ecs_host_logs" {
+  statement {
+    sid       = "HostLogs"
+    actions   = ["logs:CreateLogStream", "logs:DescribeLogStreams", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.cluster.arn}:*"]
+  }
 }
 
 resource "aws_iam_instance_profile" "ecs" {

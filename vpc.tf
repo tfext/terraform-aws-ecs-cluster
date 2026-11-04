@@ -5,6 +5,7 @@ resource "aws_security_group" "ecs_hosts" {
 }
 
 resource "aws_security_group_rule" "ecs_hosts_ssh" {
+  count             = var.ssh_access ? 1 : 0
   security_group_id = aws_security_group.ecs_hosts.id
   from_port         = 22
   to_port           = 22
@@ -12,6 +13,11 @@ resource "aws_security_group_rule" "ecs_hosts_ssh" {
   type              = "ingress"
   cidr_blocks       = ["0.0.0.0/0"]
   description       = "Global access for testing (${var.tagging.managed_by})"
+}
+
+moved {
+  from = aws_security_group_rule.ecs_hosts_ssh
+  to   = aws_security_group_rule.ecs_hosts_ssh[0]
 }
 
 resource "aws_security_group_rule" "ecs_hosts_internal" {
