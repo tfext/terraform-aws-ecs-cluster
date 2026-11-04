@@ -1,5 +1,13 @@
 resource "aws_ecs_cluster" "main" {
   name = var.name
+
+  dynamic "setting" {
+    for_each = var.container_insights ? [1] : []
+    content {
+      name  = "containerInsights"
+      value = "enabled"
+    }
+  }
 }
 
 resource "aws_ecs_capacity_provider" "capacity_provider" {
@@ -31,28 +39,48 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 }
 
 data "aws_ssm_parameter" "ecs_ami" {
-  name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
+  count = var.image_id == null ? 1 : 0
+  name  = var.image_parameter
 }
 
-data "template_cloudinit_config" "host_user_data" {
+data "cloudinit_config" "host_user_data" {
   gzip          = false
   base64_encode = false
 
   part {
     content_type = "text/cloud-config"
-    content      = templatefile("${path.module}/files/host_user_data.yml.tftpl", { cluster_name = var.name, users = var.users })
+    content      = templatefile("${path.module}/files/host_user_data.yml.tftpl", { cluster_name = var.name, log_group_name = aws_cloudwatch_log_group.cluster.name, users = var.users })
   }
 }
 
 resource "aws_launch_template" "ecs_host" {
   name                   = "${var.name}_ecs_host"
-  image_id               = data.aws_ssm_parameter.ecs_ami.value
+  image_id               = coalesce(var.image_id, try(data.aws_ssm_parameter.ecs_ami[0].value, null))
   instance_type          = var.instance_type
-  user_data              = base64encode(data.template_cloudinit_config.host_user_data.rendered)
+  user_data              = base64encode(data.cloudinit_config.host_user_data.rendered)
   update_default_version = true
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ecs.name
+  }
+
+  block_device_mappings {
+    # The root device of every ECS-optimized Amazon Linux image
+    device_name = "/dev/xvda"
+
+    ebs {
+      encrypted             = true
+      delete_on_termination = true
+    }
+  }
+
+  dynamic "metadata_options" {
+    for_each = var.require_imdsv2 ? [1] : []
+    content {
+      http_endpoint               = "enabled"
+      http_tokens                 = "required"
+      http_put_response_hop_limit = 1
+    }
   }
 
   network_interfaces {
@@ -63,12 +91,12 @@ resource "aws_launch_template" "ecs_host" {
 
   tag_specifications {
     resource_type = "instance"
-    tags = { Name = "${var.name}_ecs_host" }
+    tags          = merge(var.instance_tags, { Name = "${var.name}_ecs_host" })
   }
 
   tag_specifications {
     resource_type = "volume"
-    tags = { Name = "${var.name}_ecs_host" }
+    tags          = merge(var.instance_tags, { Name = "${var.name}_ecs_host" })
   }
 }
 

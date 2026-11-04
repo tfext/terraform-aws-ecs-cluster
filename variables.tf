@@ -129,3 +129,45 @@ variable "users" {
   default = []
   description = "Add users with SSH access to container host instances"
 }
+
+variable "image_parameter" {
+  type        = string
+  default     = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
+  description = "SSM parameter holding the hosts' image ID. Ignored when image_id is set"
+}
+
+variable "image_id" {
+  type        = string
+  default     = null
+  description = "Hosts' image ID. Overrides image_parameter"
+}
+
+variable "ssh_access" {
+  type        = bool
+  default     = true
+  description = "Open port 22 on the hosts to 0.0.0.0/0"
+}
+
+variable "require_imdsv2" {
+  type        = bool
+  default     = false
+  description = "Require IMDSv2 on the hosts, with a hop limit of 1 so containers can't reach the host's credentials"
+}
+
+variable "container_insights" {
+  type        = bool
+  default     = false
+  description = "Enable Container Insights on the cluster"
+}
+
+variable "log_retention_days" {
+  type        = number
+  default     = 7
+  description = "Retention of the cluster's log group, in days"
+}
+
+variable "instance_tags" {
+  type        = map(string)
+  default     = {}
+  description = "Tags added to the hosts and their volumes"
+}
