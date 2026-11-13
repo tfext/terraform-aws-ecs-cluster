@@ -22,6 +22,7 @@ resource "aws_ecs_capacity_provider" "capacity_provider" {
     # 4.) Terminate the old instances manually.
     auto_scaling_group_arn         = aws_autoscaling_group.ecs_hosts.arn
     managed_termination_protection = "DISABLED"
+    managed_draining               = "ENABLED" # moves tasks off a host before it's terminated
 
     managed_scaling {
       minimum_scaling_step_size = var.min_scaling_step
@@ -108,8 +109,27 @@ resource "aws_autoscaling_group" "ecs_hosts" {
   vpc_zone_identifier  = var.type == "public" ? var.vpc.public_subnet_ids : var.vpc.private_subnet_ids
   termination_policies = ["OldestLaunchConfiguration", "OldestInstance"]
 
+  # With instance_refresh, the group names the template's latest version, so a new version (a new
+  # image, for example) changes the group and starts a rolling refresh
   launch_template {
-    id = aws_launch_template.ecs_host.id
+    id      = aws_launch_template.ecs_host.id
+    version = var.instance_refresh == null ? null : aws_launch_template.ecs_host.latest_version
+  }
+
+  dynamic "instance_refresh" {
+    for_each = var.instance_refresh == null ? [] : [var.instance_refresh]
+    content {
+      strategy = "Rolling"
+      preferences {
+        min_healthy_percentage       = instance_refresh.value.min_healthy_percentage
+        max_healthy_percentage       = instance_refresh.value.max_healthy_percentage
+        instance_warmup              = instance_refresh.value.instance_warmup
+        scale_in_protected_instances = "Refresh"
+        standby_instances            = "Terminate"
+        skip_matching                = true
+        auto_rollback                = true
+      }
+    }
   }
 
   lifecycle {

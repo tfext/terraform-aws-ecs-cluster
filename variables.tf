@@ -171,3 +171,13 @@ variable "instance_tags" {
   default     = {}
   description = "Tags added to the hosts and their volumes"
 }
+
+variable "instance_refresh" {
+  type = object({
+    min_healthy_percentage = optional(number, 100)
+    max_healthy_percentage = optional(number, 200)
+    instance_warmup        = optional(number)
+  })
+  default     = null
+  description = "Replace the hosts with a rolling refresh whenever the launch template changes, such as for a new image. The defaults launch each new host before its old one is terminated. Null leaves running hosts alone"
+}

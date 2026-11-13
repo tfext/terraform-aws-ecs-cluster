@@ -40,6 +40,17 @@ Variables
 | `assign_public_ips` | `bool`   | `null`                                                                   | Give the hosts public IP addresses                            |
 | `key_pair`          | `string` | `null`                                                                   | Unused                                                        |
 | `users`             | `list(object({ name = string, ssh = string }))` | `[]`              | Users added to the hosts, with sudo and the given SSH key     |
+| `instance_refresh`  | `object({ min_healthy_percentage = optional(number, 100), max_healthy_percentage = optional(number, 200), instance_warmup = optional(number) })` | `null` | Replace the hosts with a rolling refresh whenever the launch template changes. `null` leaves running hosts alone |
+
+The image comes from `image_parameter` each time Terraform runs, so a new
+release of the image is a change to the launch template. With
+`instance_refresh` set, the Auto Scaling group names the template's latest
+version, and that change starts a rolling instance refresh: with the defaults,
+each new host is launched before its old one is terminated, scale-in protected
+hosts are replaced too, and a refresh whose new hosts fail rolls back. The
+capacity provider's managed draining moves tasks off each old host first. The
+refresh runs in AWS after the apply returns. Applying on a schedule keeps the
+hosts on the current image.
 
 The host start-up config assumes an ECS-optimized Amazon Linux image (root
 device `/dev/xvda`, `dnf`/`yum` packages `amazon-cloudwatch-agent` and
@@ -99,6 +110,9 @@ Outputs
 
 Upgrading
 ---------
+
+The capacity provider now sets `managed_draining = "ENABLED"`, AWS's default
+for new capacity providers.
 
 The default `image_parameter` moved from Amazon Linux 2 to Amazon Linux 2023,
 and the launch template's root volume is now encrypted. Both change the launch
